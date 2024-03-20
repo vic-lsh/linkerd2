@@ -1,5 +1,30 @@
-ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian12
+ARG RUNTIME_IMAGE=debian:bookworm
+# ARG RUNTIME_IMAGE=ubuntu:focal
 ARG BUILDPLATFORM=linux/amd64
+
+# front-load all the dependencies we need and cache them
+FROM $RUNTIME_IMAGE as runtime
+
+RUN apt-get update && apt-get install -y vim procps
+
+# install rust and flamegraph
+RUN apt-get update
+RUN apt-get install -y software-properties-common
+RUN apt-get install -y sudo
+RUN apt-get install -y curl
+RUN apt-get install -y linux-perf
+
+RUN HOME=/ bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+ENV PATH="${PATH}:/.cargo/bin"
+
+RUN apt-get install -y build-essential
+RUN rustup default stable
+RUN cargo install flamegraph
+
+# set perf_event_paranoid, required by perf
+RUN su -c "echo 'kernel.perf_event_paranoid = -1' > /etc/sysctl.conf"
+
+# dependency end
 
 # Precompile key slow-to-build dependencies
 FROM --platform=$BUILDPLATFORM golang:1.21-alpine as go-deps
@@ -44,8 +69,30 @@ COPY --from=fetch /build/linkerd-await /usr/lib/linkerd/linkerd-await
 COPY --from=fetch /build/linkerd-network-validator /usr/lib/linkerd/linkerd2-network-validator
 COPY --from=golang /out/proxy-identity /usr/lib/linkerd/linkerd2-proxy-identity
 COPY --from=debian:bookworm-slim /bin/sleep /bin/sleep
+
+# these dependencies are needed by the linkerd-proxy build steps
+# RUN apt-get install -y git cmake clang
+# RUN cargo install --locked tokio-console
+#
+# add test project
+# ADD proxy /proxy
+# WORKDIR /proxy
+# RUN RUSTFLAGS="--cfg tokio_unstable" cargo build --release
+# RUN cp target/release/linkerd2-proxy /usr/lib/linkerd/linkerd2-proxy
+# WORKDIR /
+
+# fast path for building linkerd-proxy
+# assume this is built from the latest source code
+COPY proxy/target/release/linkerd2-proxy /usr/lib/linkerd/linkerd2-proxy
+
+# add directory for linkerd proxy logging output
+RUN mkdir /logging
+RUN chown 2102 /logging
+
 ARG LINKERD_VERSION
 ENV LINKERD_CONTAINER_VERSION_OVERRIDE=${LINKERD_VERSION}
-ENV LINKERD2_PROXY_LOG=warn,linkerd=info
+# ENV LINKERD2_PROXY_LOG=warn,linkerd=info
+ENV LINKERD2_PROXY_LOG=debug
 ENV LINKERD2_PROXY_LOG_FORMAT=plain
 ENTRYPOINT ["/usr/lib/linkerd/linkerd2-proxy-identity"]
+# ENTRYPOINT ["/bin/bash"]
