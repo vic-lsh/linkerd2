@@ -15,6 +15,7 @@ bin
 Dockerfile*
 **/target
 target
+!proxy/target
 !target/docker-build
 web/app/dist
 web/app/yarn-error.log
