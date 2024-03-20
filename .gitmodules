@@ -1,0 +1,3 @@
+[submodule "proxy"]
+	path = proxy
+	url = git@github.com:vic-lsh/linkerd2-proxy.git
